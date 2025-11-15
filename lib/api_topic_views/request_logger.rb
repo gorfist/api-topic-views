@@ -3,9 +3,19 @@
 module ApiTopicViews
   class RequestLogger
     def self.register!
-      Middleware::RequestTracker.register_detailed_request_logger(
-        ->(env, data) { track_api_topic_view(env, data) }
-      )
+      begin
+        # Check if Middleware module exists first
+        return unless defined?(Middleware)
+        return unless defined?(Middleware::RequestTracker)
+        return unless Middleware::RequestTracker.respond_to?(:register_detailed_request_logger)
+        
+        Middleware::RequestTracker.register_detailed_request_logger(
+          ->(env, data) { track_api_topic_view(env, data) }
+        )
+      rescue NameError, NoMethodError => e
+        # Silently fail during migrations or when middleware is not available
+        Rails.logger.warn("[api-topic-views] Could not register request logger: #{e.message}") if defined?(Rails) && defined?(Rails.logger)
+      end
     end
 
     def self.track_api_topic_view(env, data)
