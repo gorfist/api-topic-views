@@ -134,11 +134,67 @@ API Request → Middleware::RequestTracker
 
 ### Plugin not tracking views
 
-1. Verify plugin is enabled: Admin → Settings → Plugins → `api_topic_views_enabled`
-2. Check if you're making API requests (include `Api-Key` or `Api-Username` header)
-3. Verify the request returns 200 status
-4. If using custom header, ensure it's being sent with the correct name
-5. Check logs for any errors: `tail -f logs/production.log | grep api-topic-views`
+**Quick diagnostic steps:**
+
+1. **Verify plugin is enabled**: Admin → Settings → Plugins → `api_topic_views_enabled` = true
+2. **Check if you're making API requests**: You MUST include proper API authentication headers:
+   - `Api-Key: your_key` AND `Api-Username: system`, OR
+   - `User-Api-Key: your_user_key`
+   
+   ⚠️ **Regular session cookies don't count as API requests!**
+
+3. **Verify the request returns 200 status** (not 301/302 redirect)
+4. **Check the URL pattern**: Must be `/t/:id.json` or `/t/:slug/:id.json`
+5. **If using custom header**, ensure it's being sent with the correct name
+
+**Enable debug logging:**
+
+Set environment variable in your `app.yml`:
+
+```yaml
+env:
+  API_TOPIC_VIEWS_DEBUG: 'true'
+```
+
+Then rebuild and check logs:
+
+```bash
+./launcher rebuild app
+./launcher logs app | grep api-topic-views
+```
+
+**Run the test script:**
+
+Access your Rails console and run the included test script:
+
+```bash
+# Docker
+./launcher enter app
+rails c
+
+# Then in console
+load 'plugins/api-topic-view/TEST_SCRIPT.rb'
+```
+
+This will check:
+- ✓ Plugin is loaded
+- ✓ Callbacks are registered  
+- ✓ Settings are correct
+- ✓ Provide a test curl command
+
+**Check detailed diagnostics:**
+
+See [DEBUG.md](DEBUG.md) for comprehensive troubleshooting steps.
+
+### Common Issues
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| **Not using API auth** | Views not counting | Include `Api-Key` + `Api-Username` headers |
+| **Wrong URL format** | No jobs queued | Use `/t/123.json` not `/t/123/` |
+| **Custom header missing** | Jobs not created | Check `api_topic_views_require_header` setting |
+| **Plugin disabled** | Nothing happens | Enable in Admin → Settings → Plugins |
+| **Jobs not processing** | Jobs queued but views don't increase | Restart Sidekiq: `./launcher restart app` |
 
 ### Settings errors during rebuild
 
@@ -162,6 +218,17 @@ MIT License - See repository for details
 - Discourse Meta: https://meta.discourse.org/
 
 ## Changelog
+
+### Version 0.2.1 (2025-11-15)
+
+- 🐛 Enhanced debugging capabilities with detailed logging
+- 📝 Added comprehensive troubleshooting documentation
+- ✨ Added test script (TEST_SCRIPT.rb) for easy diagnostics
+- ✨ Added debugging guide (DEBUG.md) and quick fix guide (QUICK_FIX.md)
+- ✨ Added test-api-request.sh script for testing API calls
+- 🔧 Improved error messages and logging in RequestLogger
+- 🔧 Added view count logging in TrackApiTopicView job
+- 📝 Enhanced README with common issues table
 
 ### Version 0.2.0 (2025-11-15)
 
