@@ -1,0 +1,7 @@
+# Discourse Compatibility File
+# This file maps Discourse versions to compatible plugin versions
+# Format: discourse_version: plugin_git_commit_hash
+
+# Compatible with Discourse 3.2.0 and above
+>= 3.2.0: 0.2.0
+
