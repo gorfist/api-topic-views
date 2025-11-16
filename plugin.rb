@@ -2,7 +2,7 @@
 
 # name: api-topic-views
 # about: Count selected API requests as topic views
-# version: 0.2.1
+# version: 0.3.0
 # authors: Discourse Community
 # url: https://github.com/gorfist/api-topic-view
 # required_version: 3.2.0

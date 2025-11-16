@@ -16,9 +16,9 @@ A Discourse plugin that counts eligible API requests as topic views, allowing AP
 
 ## How It Works
 
-1. Hooks into Discourse's `Middleware::RequestTracker` to monitor requests
-2. Identifies API requests to topic URLs (`/t/:slug/:id` or `/t/:id`)
-3. Validates request criteria (API request, 200 status, not crawler, etc.)
+1. Hooks directly into Discourse's `TopicsController#show` action using `after_action` callback
+2. Identifies API requests by checking for API keys or User API keys in headers/params
+3. Validates request criteria (API request, 200 status, topic exists, etc.)
 4. Optionally checks for a required custom header
 5. Enqueues a background job to increment topic view count
 6. Tracks user visits for authenticated requests
@@ -31,7 +31,7 @@ All settings are configurable in the Admin Panel under **Settings > Plugins > ap
 | --- | --- | --- |
 | `api_topic_views_enabled` | `true` | Master switch to enable/disable the plugin |
 | `api_topic_views_require_header` | `""` | Optional header name (e.g., `X-Count-As-View`) that must be present to count views. Leave empty to count all API requests |
-| `api_topic_views_max_per_minute_per_ip` | `0` | Reserved for future rate limiting (currently not enforced) |
+| `api_topic_views_max_per_minute_per_ip` | `0` | Maximum views per IP per topic per minute. Set to 0 to disable rate limiting |
 
 ### Custom Header Example
 
@@ -121,12 +121,12 @@ See `LOCALE_FIX.md` for details on adding new languages.
 ### Request Flow
 
 ```
-API Request → Middleware::RequestTracker 
-  → RequestLogger.track_api_topic_view
-  → Validate request criteria
+API Request → TopicsController#show 
+  → after_action: track_api_topic_view
+  → Validate request criteria (API key present, 200 status, etc.)
   → Jobs.enqueue(:track_api_topic_view)
   → TrackApiTopicView job executes
-  → Topic.views incremented
+  → Topic.views incremented (with rate limiting)
   → TopicUser.track_visit! (if authenticated)
 ```
 
@@ -218,6 +218,19 @@ MIT License - See repository for details
 - Discourse Meta: https://meta.discourse.org/
 
 ## Changelog
+
+### Version 0.3.0 (2025-11-16)
+
+- 🔧 **BREAKING CHANGE**: Switched from middleware hooks to controller hooks for more reliable tracking
+- ✨ Implemented direct `TopicsController` integration using `after_action` callback
+- ✨ Added proper rate limiting functionality (was placeholder before)
+- ✨ Added bot detection - skips tracking for bot users
+- ✨ Added deleted topic check before incrementing views
+- 🐛 Fixed view counting that wasn't working with middleware approach
+- ⚡ Improved performance by using `update_all` for atomic view increments
+- 📝 Updated documentation to reflect new architecture
+
+**Migration Note**: This version uses a completely different tracking method. If you were using the previous version and it wasn't working, this should fix it!
 
 ### Version 0.2.1 (2025-11-15)
 
