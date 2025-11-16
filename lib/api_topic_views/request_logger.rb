@@ -44,8 +44,24 @@ module ApiTopicViews
             return
           end
           
-          return unless response.status == 200
-          return if @topic.blank?
+          unless response.status == 200
+            Rails.logger.info("[api-topic-views] Response status not 200: #{response.status}") if debug_mode
+            return
+          end
+
+          # Get topic ID from @topic or from params
+          topic_id = @topic&.id || params[:id] || params[:topic_id]
+          
+          if topic_id.blank?
+            Rails.logger.info("[api-topic-views] No topic ID found in @topic or params") if debug_mode
+            return
+          end
+          
+          topic_id = topic_id.to_i
+          if topic_id <= 0
+            Rails.logger.info("[api-topic-views] Invalid topic ID: #{topic_id}") if debug_mode
+            return
+          end
 
           # Check for required header if configured
           required_header = SiteSetting.api_topic_views_require_header.to_s.strip
@@ -60,11 +76,11 @@ module ApiTopicViews
           # Get IP address
           ip = request.remote_ip
 
-          Rails.logger.info("[api-topic-views] ✓ Enqueueing view tracking for topic #{@topic.id}, user: #{current_user&.id || 'anonymous'}, ip: #{ip}")
+          Rails.logger.info("[api-topic-views] ✓ Enqueueing view tracking for topic #{topic_id}, user: #{current_user&.id || 'anonymous'}, ip: #{ip}")
 
           # Queue job to track the view
           Jobs.enqueue(:track_api_topic_view, {
-            topic_id: @topic.id,
+            topic_id: topic_id,
             ip: ip,
             user_id: current_user&.id
           })
