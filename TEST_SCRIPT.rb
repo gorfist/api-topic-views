@@ -1,166 +1,198 @@
 # frozen_string_literal: true
+# API Topic Views Plugin - Diagnostic Test Script
+# Run this in Rails console: load 'plugins/api-topic-views/TEST_SCRIPT.rb'
 
-# Test script for API Topic Views Plugin
-# Run this in Rails console: rails c
-# Then: load 'plugins/api-topic-view/TEST_SCRIPT.rb'
+puts "\n" + "="*80
+puts "API TOPIC VIEWS PLUGIN - DIAGNOSTIC TEST"
+puts "="*80 + "\n"
 
-puts "=" * 80
-puts "API Topic Views Plugin - Test Script"
-puts "=" * 80
-puts ""
-
-# Step 1: Check plugin is loaded
+# Test 1: Check if plugin is loaded
 puts "1. Checking if plugin is loaded..."
-if defined?(ApiTopicViews::RequestLogger)
-  puts "   ✓ Plugin loaded successfully"
+plugin = Discourse.plugins.find { |p| p.name == 'api-topic-views' }
+if plugin
+  puts "   ✓ Plugin loaded: api-topic-views"
+  puts "   ✓ Version: #{plugin.metadata.version}"
 else
-  puts "   ✗ Plugin NOT loaded"
-  puts "   → Run: cd /var/discourse && ./launcher restart app"
+  puts "   ✗ Plugin NOT loaded!"
+  puts "   → Check if plugin directory exists in plugins/"
+  puts "   → Try rebuilding: cd /var/discourse && ./launcher rebuild app"
   exit
 end
 
-# Step 2: Check if callback is registered
-puts ""
-puts "2. Checking if request tracker callback is registered..."
+# Test 2: Check settings
+puts "\n2. Checking plugin settings..."
 begin
-  callbacks = Middleware::RequestTracker.class_variable_get(:@@detailed_request_loggers)
-  if callbacks && callbacks.length > 0
-    puts "   ✓ #{callbacks.length} callback(s) registered"
-  else
-    puts "   ✗ No callbacks registered"
-    puts "   → The plugin may not have initialized properly"
+  enabled = SiteSetting.api_topic_views_enabled
+  puts "   ✓ api_topic_views_enabled: #{enabled}"
+  
+  header = SiteSetting.api_topic_views_require_header
+  puts "   ✓ api_topic_views_require_header: '#{header}' #{header.blank? ? '(none required)' : ''}"
+  
+  rate_limit = SiteSetting.api_topic_views_max_per_minute_per_ip
+  puts "   ✓ api_topic_views_max_per_minute_per_ip: #{rate_limit} #{rate_limit == 0 ? '(disabled)' : ''}"
+  
+  unless enabled
+    puts "\n   ⚠ WARNING: Plugin is DISABLED!"
+    puts "   → Enable it in Admin → Settings → Plugins → api_topic_views_enabled"
   end
 rescue => e
-  puts "   ✗ Error checking callbacks: #{e.message}"
+  puts "   ✗ Error loading settings: #{e.message}"
+  puts "   → Settings may not be properly defined"
 end
 
-# Step 3: Check settings
-puts ""
-puts "3. Checking plugin settings..."
-enabled = SiteSetting.api_topic_views_enabled rescue nil
-if enabled.nil?
-  puts "   ✗ Setting 'api_topic_views_enabled' not found"
-  puts "   → The plugin may not be installed correctly"
-elsif enabled
-  puts "   ✓ Plugin is enabled"
-else
-  puts "   ✗ Plugin is DISABLED"
-  puts "   → Enable at: Admin → Settings → Plugins → api_topic_views_enabled"
-end
-
-required_header = SiteSetting.api_topic_views_require_header.presence rescue nil
-if required_header
-  puts "   ⚠ Required header: '#{required_header}'"
-  puts "   → You must include this header in API requests"
-else
-  puts "   ✓ No custom header required"
-end
-
-# Step 4: Get test topic
-puts ""
-puts "4. Finding test topic..."
-test_topic = Topic.where(deleted_at: nil).first
-if test_topic
-  puts "   ✓ Test topic found: ID #{test_topic.id}"
-  puts "   ✓ Current view count: #{test_topic.views}"
-else
-  puts "   ✗ No topics found in database"
-  puts "   → Create a topic first"
-  exit
-end
-
-# Step 5: Check for API keys
-puts ""
-puts "5. Checking for API keys..."
-api_keys = ApiKey.where(revoked_at: nil)
-if api_keys.any?
-  api_key = api_keys.first
-  puts "   ✓ Found #{api_keys.count} active API key(s)"
-  puts ""
-  puts "=" * 80
-  puts "TEST COMMAND"
-  puts "=" * 80
-  puts ""
-  puts "Run this curl command from your terminal:"
-  puts ""
+# Test 3: Check if controller hook is registered
+puts "\n3. Checking controller hooks..."
+begin
+  # Check if TopicsController has our callback
+  callbacks_exist = TopicsController._process_action_callbacks.any? do |callback|
+    callback.filter.to_s.include?('track_api_topic_view')
+  end
   
-  header_flag = required_header ? " \\\n     -H '#{required_header}: true'" : ""
+  if callbacks_exist
+    puts "   ✓ Controller hook registered (after_action: track_api_topic_view)"
+  else
+    puts "   ⚠ Controller hook may not be registered"
+    puts "   → This could mean the plugin didn't initialize properly"
+  end
   
-  puts "curl -v \\"
-  puts "     -H 'Api-Key: #{api_key.key}' \\"
-  puts "     -H 'Api-Username: system'#{header_flag} \\"
-  puts "     '#{Discourse.base_url}/t/#{test_topic.id}.json'"
-  puts ""
-  puts "Expected: HTTP 200 response with topic data"
-  puts "Then run: Topic.find(#{test_topic.id}).views"
-  puts "Expected: View count should increase by 1"
+  # Check if methods exist
+  if TopicsController.private_method_defined?(:track_api_topic_view)
+    puts "   ✓ track_api_topic_view method exists"
+  else
+    puts "   ✗ track_api_topic_view method NOT found"
+  end
+  
+  if TopicsController.private_method_defined?(:is_api?)
+    puts "   ✓ is_api? method exists"
+  else
+    puts "   ✗ is_api? method NOT found"
+  end
+rescue => e
+  puts "   ✗ Error checking hooks: #{e.message}"
+end
+
+# Test 4: Check job is defined
+puts "\n4. Checking background job..."
+begin
+  if defined?(Jobs::TrackApiTopicView)
+    puts "   ✓ TrackApiTopicView job is defined"
+  else
+    puts "   ✗ TrackApiTopicView job NOT defined"
+  end
+rescue => e
+  puts "   ✗ Error checking job: #{e.message}"
+end
+
+# Test 5: Check Redis connectivity
+puts "\n5. Checking Redis connectivity..."
+begin
+  test_key = "api_topic_views:test:#{Time.now.to_i}"
+  Discourse.redis.setex(test_key, 5, "test_value")
+  value = Discourse.redis.get(test_key)
+  Discourse.redis.del(test_key)
+  
+  if value == "test_value"
+    puts "   ✓ Redis is working (needed for rate limiting)"
+  else
+    puts "   ⚠ Redis test failed"
+  end
+rescue => e
+  puts "   ✗ Redis error: #{e.message}"
+  puts "   → Rate limiting may not work"
+end
+
+# Test 6: Find a test topic
+puts "\n6. Finding a topic for testing..."
+topic = Topic.where(deleted_at: nil).where.not(archetype: 'private_message').first
+if topic
+  puts "   ✓ Found topic: ID=#{topic.id}, Title='#{topic.title.truncate(50)}'"
+  puts "   ✓ Current views: #{topic.views}"
 else
-  puts "   ✗ No active API keys found"
-  puts ""
-  puts "Create an API key:"
-  puts "1. Go to: Admin → API → Keys"
-  puts "2. Click 'New API Key'"
-  puts "3. Select 'All Users' scope"
-  puts "4. Click 'Save'"
-  puts "5. Re-run this test script"
+  puts "   ⚠ No topics found"
+  puts "   → Create a topic first to test view tracking"
 end
 
-# Step 6: Manual test function
-puts ""
-puts "=" * 80
-puts "MANUAL TEST FUNCTION"
-puts "=" * 80
-puts ""
-puts "You can also test directly in the console:"
-puts ""
-puts "# Simulate an API request"
-puts "env = {"
-puts '  "REQUEST_METHOD" => "GET",'
-puts "  \"PATH_INFO\" => \"/t/#{test_topic.id}\","
-puts '  "action_dispatch.remote_ip" => "127.0.0.1"'
-puts "}"
-puts ""
-puts "data = {"
-puts "  is_api: true,"
-puts "  is_user_api: false,"
-puts "  status: 200,"
-puts "  is_background: false,"
-puts "  is_crawler: false"
-puts "}"
-puts ""
-puts "# Track the view"
-puts "ApiTopicViews::RequestLogger.track_api_topic_view(env, data)"
-puts ""
-puts "# Check if job was queued"
-puts "Jobs::TrackApiTopicView.jobs.size"
-puts ""
-puts "# Process the job"
-puts "Jobs::TrackApiTopicView.new.execute(Jobs::TrackApiTopicView.jobs.last['args'].first)"
-puts ""
-puts "# Check view count"
-puts "Topic.find(#{test_topic.id}).reload.views"
-puts ""
-
-# Step 7: Check current job queue
-puts "=" * 80
-puts "CURRENT JOB QUEUE STATUS"
-puts "=" * 80
-puts ""
-job_count = Jobs::TrackApiTopicView.jobs.size rescue 0
-puts "Queued jobs: #{job_count}"
-if job_count > 0
-  puts ""
-  puts "⚠ Warning: #{job_count} job(s) are waiting to be processed"
-  puts "These may be from previous API requests"
-  puts ""
-  puts "To process them now:"
-  puts "Jobs::TrackApiTopicView.jobs.each do |job|"
-  puts "  Jobs::TrackApiTopicView.new.execute(job['args'].first)"
-  puts "end"
+# Test 7: Check for API keys
+puts "\n7. Checking for API keys..."
+begin
+  api_keys_count = ApiKey.where(revoked_at: nil).count
+  if api_keys_count > 0
+    puts "   ✓ Found #{api_keys_count} active API key(s)"
+    
+    # Show a sample key (first 10 chars only)
+    sample_key = ApiKey.where(revoked_at: nil).first
+    if sample_key
+      puts "   ✓ Sample key ID: #{sample_key.id}, User: #{sample_key.user&.username || 'system'}"
+      puts "     Key starts with: #{sample_key.key[0..9]}..."
+    end
+  else
+    puts "   ⚠ No API keys found"
+    puts "   → Create one in Admin → API → Keys"
+  end
+rescue => e
+  puts "   ✗ Error checking API keys: #{e.message}"
 end
 
-puts ""
-puts "=" * 80
-puts "Test script complete!"
-puts "=" * 80
+# Test 8: Environment check
+puts "\n8. Environment information..."
+puts "   • Rails version: #{Rails.version}"
+puts "   • Discourse version: #{Discourse::VERSION::STRING}"
+puts "   • Ruby version: #{RUBY_VERSION}"
+puts "   • Environment: #{Rails.env}"
 
+debug_mode = ENV['API_TOPIC_VIEWS_DEBUG'] == 'true' || Rails.env.development?
+puts "   • Debug logging: #{debug_mode ? 'ENABLED' : 'DISABLED'}"
+unless debug_mode
+  puts "     → Enable debug logging by adding API_TOPIC_VIEWS_DEBUG: 'true' to app.yml"
+end
+
+# Summary and test command
+puts "\n" + "="*80
+puts "SUMMARY"
+puts "="*80
+
+if plugin && enabled && topic
+  puts "\n✓ Plugin appears to be working!"
+  puts "\nTo test view tracking, run this command from your terminal:\n\n"
+  
+  base_url = Discourse.base_url
+  api_key = ApiKey.where(revoked_at: nil).first
+  
+  if api_key
+    username = api_key.user&.username || 'system'
+    puts "curl -v \\"
+    puts "  -H 'Api-Key: #{api_key.key}' \\"
+    puts "  -H 'Api-Username: #{username}' \\"
+    puts "  '#{base_url}/t/#{topic.id}.json'"
+    puts "\n"
+    puts "Before running, note the current view count: #{topic.views}"
+    puts "After running, check if it increased to: #{topic.views + 1}"
+    puts "\nTo see detailed logs:"
+    puts "  cd /var/discourse"
+    puts "  ./launcher logs app | grep api-topic-views"
+  else
+    puts "⚠ Cannot generate test command - no API key found"
+    puts "→ Create an API key in Admin → API → Keys first"
+  end
+else
+  puts "\n⚠ Issues detected - review the output above"
+  
+  unless plugin
+    puts "  • Plugin is not loaded"
+  end
+  
+  unless enabled
+    puts "  • Plugin is disabled - enable in Admin → Settings"
+  end
+  
+  unless topic
+    puts "  • No topics available for testing"
+  end
+end
+
+puts "\n" + "="*80
+puts "For more help, see:"
+puts "  • README.md in the plugin directory"
+puts "  • UPGRADE_GUIDE.md for version-specific information"
+puts "  • https://github.com/gorfist/api-topic-views/issues"
+puts "="*80 + "\n"
